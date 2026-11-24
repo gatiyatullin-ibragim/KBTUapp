@@ -1,47 +1,19 @@
 <script lang="ts">
   import ChevronLeft from '@lucide/svelte/icons/chevron-left';
-  import Ellipsis from '@lucide/svelte/icons/ellipsis';
+  import LayoutGrid from '@lucide/svelte/icons/layout-grid';
   import Search from '@lucide/svelte/icons/search';
   import X from '@lucide/svelte/icons/x';
-  import Share from '@lucide/svelte/icons/share';
-  import ExternalLink from '@lucide/svelte/icons/external-link';
-  import RotateCw from '@lucide/svelte/icons/rotate-cw';
-  import Settings from '@lucide/svelte/icons/settings';
-  import LogOut from '@lucide/svelte/icons/log-out';
-  import { api } from '../lib/api';
   import { t } from '../lib/i18n/index.svelte';
   import { flushSync, tick } from 'svelte';
-  import { close, goTab, overlays, say, ui } from '../lib/state/ui.svelte';
-  import { backButton, openTelegramLink, telegramAppLink } from '../lib/tg';
-  import { copyText } from './copy';
+  import { close, goTab, open, overlays, ui } from '../lib/state/ui.svelte';
+  import { backButton } from '../lib/tg';
   import { glass } from './glass';
-  import { menu } from './menu';
+  import QuickLaunch from './QuickLaunch.svelte';
   import { tabSearches, type TabSearch } from './PullSearch.svelte';
 
-  let { back, start, onsettings }: { back: boolean; start: string; onsettings: () => void } = $props();
-  let menuId = $state(0), signingOut = $state(false);
-  const expanded = $derived(overlays.some((o) => o.id === menuId && !o.closing));
-
-  async function share(url: string) {
-    try {
-      if (navigator.share) await navigator.share({ url });
-      else if (!(await copyText(url, t('sl.copied')))) say(t('common.error'), 'warning_3d');
-    } catch (e) {
-      if (!(e instanceof DOMException && e.name === 'AbortError')) say(t('common.error'), 'warning_3d');
-    }
-  }
-
-  async function signOut() {
-    if (signingOut) return;
-    signingOut = true;
-    try {
-      await api.webLogout();
-      location.reload();
-    } catch {
-      signingOut = false;
-      say(t('common.error'), 'warning_3d');
-    }
-  }
+  let { back }: { back: boolean } = $props();
+  let quickId = $state(0);
+  const expanded = $derived(overlays.some((o) => o.id === quickId && !o.closing));
 
   // The one search of the web app. No Back: the left pill is Search, and a tap stretches it into a field across the whole
   // bar (the capsule and the menu step aside); it types into the tab's own search (each tab's PullSearch lends its
@@ -55,6 +27,7 @@
   }) ?? null;
 
   async function search() {
+    if (expanded) close(quickId, true);
     if (ui.tab === 'profile') goTab('afisha');
     else if (!mine()) return;
     tabAt = ui.tab;
@@ -84,16 +57,10 @@
     return () => document.documentElement.removeAttribute('data-search');
   });
 
-  function options(e: MouseEvent) {
-    if (expanded) { close(menuId); return; }
-    const url = telegramAppLink(start);
-    menuId = menu(e.currentTarget as HTMLElement, [
-      { label: t('web.share'), icon: Share, onselect: () => void share(url) },
-      { label: t('tgo.open'), icon: ExternalLink, onselect: () => openTelegramLink(url) },
-      { label: t('web.reload'), icon: RotateCw, onselect: () => location.reload() },
-      { label: t('me.settings'), icon: Settings, onselect: onsettings },
-      { label: t('web.signOut'), icon: LogOut, destructive: true, disabled: signingOut, onselect: () => void signOut() },
-    ], 'end');
+  // the quick launch (owner, Nov 24): the shortcuts unfold under the pill (ui/QuickLaunch); the rare items live in Settings
+  function quick(e: MouseEvent) {
+    if (expanded) { close(quickId, true); return; }
+    quickId = open(QuickLaunch, { anchor: e.currentTarget as HTMLElement });
   }
 </script>
 
@@ -114,8 +81,9 @@
       <button class="x" type="button" aria-label={t('common.close')} onclick={shut}><X size={15} strokeWidth={2.4} /></button>
     </label>
   </div>
-  <button class="glass glass-pill side more" class:away={shown} type="button" inert={shown} aria-label={t('web.menu')} aria-haspopup="menu" aria-expanded={expanded} onclick={options} use:glass={{ bloom: true }}>
-    <span class="tone-base" aria-hidden="true"></span><Ellipsis size={18} strokeWidth={2.4} />
+  <button class="glass glass-pill side more" class:open={expanded} type="button" inert={shown} aria-label={t('web.quick')} aria-haspopup="menu" aria-expanded={expanded} onclick={quick} use:glass={{ bloom: true }}>
+    <span class="tone-base" aria-hidden="true"></span>
+    <i class="g"><LayoutGrid size={17} strokeWidth={2.2} /></i><i class="g x"><X size={18} strokeWidth={2.4} /></i>
   </button>
 </header>
 
@@ -133,6 +101,10 @@
   .side :global(svg) { flex: none; }
   .more { position: absolute; right: 12px; top: 2px; display: flex; align-items: center; justify-content: center; }
   .more.away { opacity: 0; transform: translateX(12px) scale(.9); }
+  /* the grid turns into the x that folds the shortcuts away, and back */
+  .g { position: absolute; display: flex; transition: opacity 180ms var(--ease), transform 420ms var(--ease-spring); }
+  .g.x, .open .g:not(.x) { opacity: 0; transform: rotate(-90deg) scale(.6); }
+  .open .g.x { opacity: 1; transform: none; }
 
   .face { display: flex; align-items: center; justify-content: center; gap: 3px; width: var(--pill); height: 100%; padding-inline: 6px;
     color: inherit; font: inherit; letter-spacing: inherit; transition: opacity 160ms var(--ease); }
@@ -166,6 +138,7 @@
   .x::after { content: ''; position: absolute; inset: -7px; } /* a 44 px target */
   @media (prefers-reduced-motion: reduce) {
     .side, .ico > i, .txt > i, .fld { transition: opacity 120ms linear !important; }
-    .ico > i, .txt > i, .more.away { transform: none !important; }
+    .ico > i, .txt > i, .more.away, .g { transform: none !important; }
+    .g { transition: opacity 120ms linear !important; }
   }
 </style>
